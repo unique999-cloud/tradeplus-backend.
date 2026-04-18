@@ -22,8 +22,6 @@ const PAIRS = [
   { symbol:'GBP/USD', av:'GBPUSD' },
   { symbol:'USD/JPY', av:'USDJPY' },
   { symbol:'AUD/USD', av:'AUDUSD' },
-  { symbol:'USD/CAD', av:'USDCAD' },
-  { symbol:'EUR/GBP', av:'EURGBP' },
   { symbol:'XAU/USD', av:'XAUUSD' },
 ];
 
