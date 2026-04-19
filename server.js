@@ -454,5 +454,11 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Keep Railway awake — ping self every 14 minutes
+setInterval(() => {
+  fetch(`http://localhost:${process.env.PORT || 3000}/api/health`)
+    .catch(() => {});
+}, 14 * 60 * 1000);
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ TRADEPLUS v3 Backend running on port ${PORT}`));
