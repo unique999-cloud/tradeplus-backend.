@@ -58,35 +58,13 @@ async function getLivePrice(base, quote) {
     }
   } catch(e) { /* try next source */ }
 
-  // Gold price — using multiple free sources
+  // Gold price from metals API (free)
   try {
     if (base === 'XAU') {
-      // Try metals-api free endpoint
       const url  = `https://api.metals.live/v1/spot/gold`;
       const res  = await fetch(url, { timeout: 5000 });
       const data = await res.json();
       if (data && data.price) return parseFloat(data.price);
-    }
-  } catch(e) { /* try next */ }
-
-  // Gold fallback — frankfurter doesn't support XAU
-  // Use a reliable gold price API
-  try {
-    if (base === 'XAU') {
-      const url  = `https://api.coinbase.com/v2/exchange-rates?currency=XAU`;
-      const res  = await fetch(url, { timeout: 5000 });
-      const data = await res.json();
-      if (data?.data?.rates?.USD) return parseFloat(data.data.rates.USD);
-    }
-  } catch(e) { /* try next */ }
-
-  // Final gold fallback
-  try {
-    if (base === 'XAU') {
-      const url  = `https://open.er-api.com/v6/latest/XAU`;
-      const res  = await fetch(url, { timeout: 5000 });
-      const data = await res.json();
-      if (data?.rates?.USD) return parseFloat(data.rates.USD);
     }
   } catch(e) { /* failed */ }
 
