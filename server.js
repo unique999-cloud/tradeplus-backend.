@@ -26,7 +26,7 @@ const PAIRS = [
 
 // Cache
 const cache = {};
-const PRICE_TTL   = 30  * 1000;        // 30 seconds for prices
+const PRICE_TTL   = 25  * 1000;        // 25 seconds for prices
 const CANDLE_TTL  = 10  * 60 * 1000;   // 10 minutes for candles
 
 // ============================================================
@@ -58,13 +58,35 @@ async function getLivePrice(base, quote) {
     }
   } catch(e) { /* try next source */ }
 
-  // Gold price from metals API (free)
+  // Gold price — using multiple free sources
   try {
     if (base === 'XAU') {
+      // Try metals-api free endpoint
       const url  = `https://api.metals.live/v1/spot/gold`;
       const res  = await fetch(url, { timeout: 5000 });
       const data = await res.json();
       if (data && data.price) return parseFloat(data.price);
+    }
+  } catch(e) { /* try next */ }
+
+  // Gold fallback — frankfurter doesn't support XAU
+  // Use a reliable gold price API
+  try {
+    if (base === 'XAU') {
+      const url  = `https://api.coinbase.com/v2/exchange-rates?currency=XAU`;
+      const res  = await fetch(url, { timeout: 5000 });
+      const data = await res.json();
+      if (data?.data?.rates?.USD) return parseFloat(data.data.rates.USD);
+    }
+  } catch(e) { /* try next */ }
+
+  // Final gold fallback
+  try {
+    if (base === 'XAU') {
+      const url  = `https://open.er-api.com/v6/latest/XAU`;
+      const res  = await fetch(url, { timeout: 5000 });
+      const data = await res.json();
+      if (data?.rates?.USD) return parseFloat(data.rates.USD);
     }
   } catch(e) { /* failed */ }
 
@@ -269,24 +291,36 @@ function generateSignal(rsi, macd, structure, price, candles, symbol) {
   // Calculate levels using ATR
   const atr = candles.slice(-14).reduce((s,c,i) => i===0 ? s : s + Math.abs(c.high-c.low), 0) / 13;
   const dp  = symbol === 'USD/JPY' ? 3 : symbol === 'XAU/USD' ? 2 : 4;
-  const rL  = candles.slice(-10).map(c => c.low);
-  const rH  = candles.slice(-10).map(c => c.high);
   let sl, tp;
 
+  // Use ATR-based levels — safer and more reliable than candle highs/lows
   if (signal === 'BUY') {
-    sl = (Math.min(...rL) - atr * 0.3).toFixed(dp);
-    tp = (price + (price - parseFloat(sl)) * 2).toFixed(dp);
+    sl = parseFloat((price - atr * 1.5).toFixed(dp));  // SL below entry
+    tp = parseFloat((price + atr * 3.0).toFixed(dp));  // TP above entry (1:2 RR)
   } else if (signal === 'SELL') {
-    sl = (Math.max(...rH) + atr * 0.3).toFixed(dp);
-    tp = (price - (parseFloat(sl) - price) * 2).toFixed(dp);
+    sl = parseFloat((price + atr * 1.5).toFixed(dp));  // SL above entry
+    tp = parseFloat((price - atr * 3.0).toFixed(dp));  // TP below entry (1:2 RR)
   } else {
-    sl = (price - atr).toFixed(dp);
-    tp = (price + atr).toFixed(dp);
+    sl = parseFloat((price - atr * 1.5).toFixed(dp));
+    tp = parseFloat((price + atr * 1.5).toFixed(dp));
   }
 
+  // Safety check — make sure levels make sense
+  if (signal === 'BUY' && (sl >= price || tp <= price)) {
+    sl = parseFloat((price - atr * 1.5).toFixed(dp));
+    tp = parseFloat((price + atr * 3.0).toFixed(dp));
+  }
+  if (signal === 'SELL' && (sl <= price || tp >= price)) {
+    sl = parseFloat((price + atr * 1.5).toFixed(dp));
+    tp = parseFloat((price - atr * 3.0).toFixed(dp));
+  }
+
+  // Cap confidence at 85% maximum
+  const cappedConf = Math.min(conf, 85);
+
   return {
-    signal, confidence: conf,
-    entry: price.toFixed(dp), sl, tp,
+    signal, confidence: cappedConf,
+    entry: price.toFixed(dp), sl: sl.toFixed(dp), tp: tp.toFixed(dp),
     rsi, macd: macd?.macd || null,
     macdBullish: macd?.bullish ?? null,
     structure, spread, blackout,
