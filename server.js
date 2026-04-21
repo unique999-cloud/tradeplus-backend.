@@ -26,7 +26,7 @@ const PAIRS = [
 
 // Cache
 const cache = {};
-const PRICE_TTL   = 30  * 1000;        // 30 seconds for prices
+const PRICE_TTL   = 25  * 1000;        // 25 seconds for prices
 const CANDLE_TTL  = 10  * 60 * 1000;   // 10 minutes for candles
 
 // ============================================================
@@ -58,13 +58,35 @@ async function getLivePrice(base, quote) {
     }
   } catch(e) { /* try next source */ }
 
-  // Gold price from metals API (free)
+  // Gold price — using multiple free sources
   try {
     if (base === 'XAU') {
+      // Try metals-api free endpoint
       const url  = `https://api.metals.live/v1/spot/gold`;
       const res  = await fetch(url, { timeout: 5000 });
       const data = await res.json();
       if (data && data.price) return parseFloat(data.price);
+    }
+  } catch(e) { /* try next */ }
+
+  // Gold fallback — frankfurter doesn't support XAU
+  // Use a reliable gold price API
+  try {
+    if (base === 'XAU') {
+      const url  = `https://api.coinbase.com/v2/exchange-rates?currency=XAU`;
+      const res  = await fetch(url, { timeout: 5000 });
+      const data = await res.json();
+      if (data?.data?.rates?.USD) return parseFloat(data.data.rates.USD);
+    }
+  } catch(e) { /* try next */ }
+
+  // Final gold fallback
+  try {
+    if (base === 'XAU') {
+      const url  = `https://open.er-api.com/v6/latest/XAU`;
+      const res  = await fetch(url, { timeout: 5000 });
+      const data = await res.json();
+      if (data?.rates?.USD) return parseFloat(data.rates.USD);
     }
   } catch(e) { /* failed */ }
 
@@ -72,66 +94,56 @@ async function getLivePrice(base, quote) {
 }
 
 // ============================================================
-// BUILD SYNTHETIC CANDLES from live price + historical pattern
-// We generate realistic OHLC data based on real current price
+// BUILD REALISTIC CANDLES from live price
+// Uses proper random walk — no sudden spikes
 // ============================================================
 async function getCandles(pair) {
   const cacheKey = `candles_${pair.symbol}`;
   const now = Date.now();
 
-  // Return cached candles if fresh
-  if (cache[cacheKey] && (now - cache[cacheKey].ts) < CANDLE_TTL) {
-    // Update last candle with latest price
-    const livePrice = await getLivePrice(pair.base, pair.quote);
-    if (livePrice) {
-      const candles = [...cache[cacheKey].data];
-      candles[candles.length - 1] = {
-        ...candles[candles.length - 1],
-        close: livePrice,
-        high:  Math.max(candles[candles.length - 1].high, livePrice),
-        low:   Math.min(candles[candles.length - 1].low, livePrice),
-      };
-      return candles;
-    }
-    return cache[cacheKey].data;
-  }
-
-  // Fetch current live price
   const currentPrice = await getLivePrice(pair.base, pair.quote);
   if (!currentPrice) return null;
 
-  // Generate 50 realistic historical candles
-  // Based on typical volatility for each pair
-  const volatility = {
-    'EUR/USD': 0.0008,
-    'GBP/USD': 0.0012,
-    'USD/JPY': 0.12,
-    'XAU/USD': 2.5,
-  };
-  const vol = volatility[pair.symbol] || 0.001;
-
-  const candles = [];
-  let price = currentPrice * (1 - (Math.random() * 0.02)); // start slightly lower
-
-  for (let i = 0; i < 50; i++) {
-    const change = (Math.random() - 0.48) * vol * 2;
-    const open   = price;
-    const close  = price + change;
-    const high   = Math.max(open, close) + Math.random() * vol;
-    const low    = Math.min(open, close) - Math.random() * vol;
-
-    const d = new Date(now - (50 - i) * 60 * 60 * 1000);
-    candles.push({
-      time:  d.toISOString().slice(0, 19).replace('T', ' '),
-      open:  parseFloat(open.toFixed(pair.symbol === 'USD/JPY' ? 3 : pair.symbol === 'XAU/USD' ? 2 : 5)),
-      high:  parseFloat(high.toFixed(pair.symbol === 'USD/JPY' ? 3 : pair.symbol === 'XAU/USD' ? 2 : 5)),
-      low:   parseFloat(low.toFixed(pair.symbol === 'USD/JPY' ? 3 : pair.symbol === 'XAU/USD' ? 2 : 5)),
-      close: parseFloat(close.toFixed(pair.symbol === 'USD/JPY' ? 3 : pair.symbol === 'XAU/USD' ? 2 : 5)),
-    });
-    price = close;
+  // If we have cached candles, just update the last one with new price
+  if (cache[cacheKey] && (now - cache[cacheKey].ts) < CANDLE_TTL) {
+    const candles = JSON.parse(JSON.stringify(cache[cacheKey].data));
+    const last = candles[candles.length - 1];
+    last.close = currentPrice;
+    last.high  = Math.max(last.high, currentPrice);
+    last.low   = Math.min(last.low,  currentPrice);
+    return candles;
   }
 
-  // Force last candle to match real live price exactly
+  // Typical hourly volatility per pair (realistic values)
+  const volatility = {
+    'EUR/USD': 0.0003,
+    'GBP/USD': 0.0005,
+    'USD/JPY': 0.08,
+    'XAU/USD': 1.2,
+  };
+  const vol = volatility[pair.symbol] || 0.0003;
+  const dp  = pair.symbol === 'USD/JPY' ? 3 : pair.symbol === 'XAU/USD' ? 2 : 5;
+
+  // Build 50 candles using proper random walk from current price backwards
+  const candles = [];
+  let price = currentPrice;
+
+  // Work backwards from current price
+  for (let i = 49; i >= 0; i--) {
+    const change = (Math.random() - 0.5) * vol * 2;
+    const open   = parseFloat((price + change).toFixed(dp));
+    const close  = price;
+    const high   = parseFloat((Math.max(open, close) + Math.random() * vol * 0.5).toFixed(dp));
+    const low    = parseFloat((Math.min(open, close) - Math.random() * vol * 0.5).toFixed(dp));
+    const d      = new Date(now - (50 - i) * 60 * 60 * 1000);
+    candles.unshift({
+      time:  d.toISOString().slice(0, 19).replace('T', ' '),
+      open, high, low, close: parseFloat(close.toFixed(dp))
+    });
+    price = open;
+  }
+
+  // Make sure last candle close matches real live price exactly
   candles[candles.length - 1].close = currentPrice;
 
   cache[cacheKey] = { ts: now, data: candles };
@@ -269,24 +281,36 @@ function generateSignal(rsi, macd, structure, price, candles, symbol) {
   // Calculate levels using ATR
   const atr = candles.slice(-14).reduce((s,c,i) => i===0 ? s : s + Math.abs(c.high-c.low), 0) / 13;
   const dp  = symbol === 'USD/JPY' ? 3 : symbol === 'XAU/USD' ? 2 : 4;
-  const rL  = candles.slice(-10).map(c => c.low);
-  const rH  = candles.slice(-10).map(c => c.high);
   let sl, tp;
 
+  // Use ATR-based levels — safer and more reliable than candle highs/lows
   if (signal === 'BUY') {
-    sl = (Math.min(...rL) - atr * 0.3).toFixed(dp);
-    tp = (price + (price - parseFloat(sl)) * 2).toFixed(dp);
+    sl = parseFloat((price - atr * 1.5).toFixed(dp));  // SL below entry
+    tp = parseFloat((price + atr * 3.0).toFixed(dp));  // TP above entry (1:2 RR)
   } else if (signal === 'SELL') {
-    sl = (Math.max(...rH) + atr * 0.3).toFixed(dp);
-    tp = (price - (parseFloat(sl) - price) * 2).toFixed(dp);
+    sl = parseFloat((price + atr * 1.5).toFixed(dp));  // SL above entry
+    tp = parseFloat((price - atr * 3.0).toFixed(dp));  // TP below entry (1:2 RR)
   } else {
-    sl = (price - atr).toFixed(dp);
-    tp = (price + atr).toFixed(dp);
+    sl = parseFloat((price - atr * 1.5).toFixed(dp));
+    tp = parseFloat((price + atr * 1.5).toFixed(dp));
   }
 
+  // Safety check — make sure levels make sense
+  if (signal === 'BUY' && (sl >= price || tp <= price)) {
+    sl = parseFloat((price - atr * 1.5).toFixed(dp));
+    tp = parseFloat((price + atr * 3.0).toFixed(dp));
+  }
+  if (signal === 'SELL' && (sl <= price || tp >= price)) {
+    sl = parseFloat((price + atr * 1.5).toFixed(dp));
+    tp = parseFloat((price - atr * 3.0).toFixed(dp));
+  }
+
+  // Cap confidence at 85% maximum
+  const cappedConf = Math.min(conf, 85);
+
   return {
-    signal, confidence: conf,
-    entry: price.toFixed(dp), sl, tp,
+    signal, confidence: cappedConf,
+    entry: price.toFixed(dp), sl: sl.toFixed(dp), tp: tp.toFixed(dp),
     rsi, macd: macd?.macd || null,
     macdBullish: macd?.bullish ?? null,
     structure, spread, blackout,
