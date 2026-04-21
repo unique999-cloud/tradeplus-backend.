@@ -58,35 +58,39 @@ async function getLivePrice(base, quote) {
     }
   } catch(e) { /* try next source */ }
 
-  // Gold price — using multiple free sources
+  // Gold price — using reliable free sources
   try {
     if (base === 'XAU') {
-      // Try metals-api free endpoint
-      const url  = `https://api.metals.live/v1/spot/gold`;
+      // Use frankfurter with USD base and convert
+      const url = `https://api.frankfurter.app/latest?from=USD&to=EUR`;
       const res  = await fetch(url, { timeout: 5000 });
-      const data = await res.json();
-      if (data && data.price) return parseFloat(data.price);
+      // Frankfurter doesn't support XAU, use metals.live
+      const goldUrl = `https://api.metals.live/v1/spot/gold`;
+      const goldRes = await fetch(goldUrl, { timeout: 5000 });
+      const goldData = await goldRes.json();
+      if (goldData && goldData.price && goldData.price > 1000) {
+        return parseFloat(goldData.price);
+      }
     }
   } catch(e) { /* try next */ }
 
-  // Gold fallback — frankfurter doesn't support XAU
-  // Use a reliable gold price API
   try {
     if (base === 'XAU') {
-      const url  = `https://api.coinbase.com/v2/exchange-rates?currency=XAU`;
-      const res  = await fetch(url, { timeout: 5000 });
+      // Alternative gold API
+      const url  = `https://www.goldapi.io/api/XAU/USD`;
+      const res  = await fetch(url, { timeout: 5000, headers: { 'x-access-token': 'goldapi-free' } });
       const data = await res.json();
-      if (data?.data?.rates?.USD) return parseFloat(data.data.rates.USD);
+      if (data && data.price && data.price > 1000) return parseFloat(data.price);
     }
   } catch(e) { /* try next */ }
 
-  // Final gold fallback
   try {
     if (base === 'XAU') {
+      // Use open.er-api for XAU
       const url  = `https://open.er-api.com/v6/latest/XAU`;
       const res  = await fetch(url, { timeout: 5000 });
       const data = await res.json();
-      if (data?.rates?.USD) return parseFloat(data.rates.USD);
+      if (data?.rates?.USD && data.rates.USD > 1000) return parseFloat(data.rates.USD);
     }
   } catch(e) { /* failed */ }
 
@@ -278,31 +282,30 @@ function generateSignal(rsi, macd, structure, price, candles, symbol) {
   const blackout = isBlackout();
   if (blackout || spread > 3) signal = 'WAIT';
 
-  // Calculate levels using ATR
-  const atr = candles.slice(-14).reduce((s,c,i) => i===0 ? s : s + Math.abs(c.high-c.low), 0) / 13;
+  // Calculate levels using ATR with minimum size guarantee
+  const rawAtr = candles.slice(-14).reduce((s,c,i) => i===0 ? s : s + Math.abs(c.high-c.low), 0) / 13;
+
+  // Minimum ATR per pair to ensure meaningful SL/TP distances
+  const minAtr = { 'EUR/USD':0.0015, 'GBP/USD':0.0020, 'USD/JPY':0.20, 'XAU/USD':5.0 };
+  const atr = Math.max(rawAtr, minAtr[symbol] || 0.0015);
   const dp  = symbol === 'USD/JPY' ? 3 : symbol === 'XAU/USD' ? 2 : 4;
   let sl, tp;
 
-  // Use ATR-based levels — safer and more reliable than candle highs/lows
   if (signal === 'BUY') {
-    sl = parseFloat((price - atr * 1.5).toFixed(dp));  // SL below entry
-    tp = parseFloat((price + atr * 3.0).toFixed(dp));  // TP above entry (1:2 RR)
+    sl = parseFloat((price - atr * 1.5).toFixed(dp));
+    tp = parseFloat((price + atr * 3.0).toFixed(dp));
+    // Safety check
+    if (sl >= price) sl = parseFloat((price - minAtr[symbol] * 2).toFixed(dp));
+    if (tp <= price) tp = parseFloat((price + minAtr[symbol] * 4).toFixed(dp));
   } else if (signal === 'SELL') {
-    sl = parseFloat((price + atr * 1.5).toFixed(dp));  // SL above entry
-    tp = parseFloat((price - atr * 3.0).toFixed(dp));  // TP below entry (1:2 RR)
+    sl = parseFloat((price + atr * 1.5).toFixed(dp));
+    tp = parseFloat((price - atr * 3.0).toFixed(dp));
+    // Safety check
+    if (sl <= price) sl = parseFloat((price + minAtr[symbol] * 2).toFixed(dp));
+    if (tp >= price) tp = parseFloat((price - minAtr[symbol] * 4).toFixed(dp));
   } else {
     sl = parseFloat((price - atr * 1.5).toFixed(dp));
     tp = parseFloat((price + atr * 1.5).toFixed(dp));
-  }
-
-  // Safety check — make sure levels make sense
-  if (signal === 'BUY' && (sl >= price || tp <= price)) {
-    sl = parseFloat((price - atr * 1.5).toFixed(dp));
-    tp = parseFloat((price + atr * 3.0).toFixed(dp));
-  }
-  if (signal === 'SELL' && (sl <= price || tp >= price)) {
-    sl = parseFloat((price + atr * 1.5).toFixed(dp));
-    tp = parseFloat((price - atr * 3.0).toFixed(dp));
   }
 
   // Cap confidence at 85% maximum
@@ -387,7 +390,7 @@ async function getSignalForPair(pair) {
 // ============================================================
 app.get('/', (req, res) => res.json({
   status:   'TRADEPLUS BACKEND LIVE ✅',
-  version:  '5.0',
+  version:  '6.0',
   source:   'Frankfurter + ExchangeRate APIs — Real-time matching Exness/MT5',
   session:  getSession(),
   blackout: isBlackout(),
@@ -437,7 +440,7 @@ app.get('/api/news', async (req, res) => {
 
 app.get('/api/health', (req, res) => res.json({
   alive:    true,
-  version:  '5.0',
+  version:  '6.0',
   session:  getSession(),
   blackout: isBlackout(),
   cached:   Object.keys(cache).length,
