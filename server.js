@@ -387,7 +387,7 @@ async function getSignalForPair(pair) {
 // ============================================================
 app.get('/', (req, res) => res.json({
   status:   'TRADEPLUS BACKEND LIVE ✅',
-  version:  '4.0',
+  version:  '5.0',
   source:   'Frankfurter + ExchangeRate APIs — Real-time matching Exness/MT5',
   session:  getSession(),
   blackout: isBlackout(),
@@ -437,7 +437,7 @@ app.get('/api/news', async (req, res) => {
 
 app.get('/api/health', (req, res) => res.json({
   alive:    true,
-  version:  '4.0',
+  version:  '5.0',
   session:  getSession(),
   blackout: isBlackout(),
   cached:   Object.keys(cache).length,
