@@ -26,8 +26,8 @@ const PAIRS = [
 
 // Cache
 const cache = {};
-const PRICE_TTL   = 25  * 1000;        // 25 seconds for prices
-const CANDLE_TTL  = 10  * 60 * 1000;   // 10 minutes for candles
+const PRICE_TTL   = 25  * 1000;   // 25 seconds for prices
+const CANDLE_TTL  = 25  * 1000;   // 25 seconds for candles — matches frontend refresh
 
 // ============================================================
 // FETCH LIVE PRICE — uses multiple free sources for reliability
