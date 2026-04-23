@@ -1,4 +1,4 @@
-const express = require('express');
+ const express = require('express');
 const fetch = (...args) => import('node-fetch').then(({default:f})=>f(...args));
 const app = express();
 
@@ -17,7 +17,7 @@ const PAIRS = [
   { symbol: 'EUR/USD', stooq: 'eurusd' },
   { symbol: 'GBP/USD', stooq: 'gbpusd' },
   { symbol: 'USD/JPY', stooq: 'usdjpy' },
-  { symbol: 'XAU/USD', stooq: 'xauusd' },
+  { symbol: 'XAU/USD', stooq: 'xauusd.cf' },
 ];
 
 const cache = {};
@@ -36,6 +36,8 @@ async function getLivePrice(stooqSymbol) {
     if (lines.length < 2) return null;
     const close = parseFloat(lines[1].split(',')[6]);
     if (!close || isNaN(close) || close <= 0) return null;
+    // Sanity check for Gold — must be between 1000 and 5000
+    if (stooqSymbol.includes('xau') && (close < 1000 || close > 5000)) return null;
     return close;
   } catch(e) { return null; }
 }
@@ -402,8 +404,8 @@ function deepEngine(ind, price, symbol){
   const conf=Math.min(total>0?Math.round((Math.max(bull,bear)/total)*100):50,85);
 
   let signal='WAIT';
-  if(bull>bear&&bull>=8&&conf>=65)signal='BUY';
-  else if(bear>bull&&bear>=8&&conf>=65)signal='SELL';
+  if(bull>bear&&bull>=8&&conf>=60)signal='BUY';
+  else if(bear>bull&&bear>=8&&conf>=60)signal='SELL';
 
   return{signal,confidence:conf,bull,bear,factors};
 }
@@ -492,7 +494,7 @@ function buildReasons(result,ind,signal,symbol){
 
   if(signal==='BUY')r.push({icon:'✅',text:`STRONG BUY — ${Math.max(bull,bear)} confluent factors agree. Set your SL and TP on MT5 before entering.`});
   else if(signal==='SELL')r.push({icon:'🔴',text:`STRONG SELL — ${Math.max(bull,bear)} confluent factors agree. Set your SL and TP on MT5 before entering.`});
-  else r.push({icon:'⏳',text:`Score ${Math.max(bull,bear)}/8 needed — not enough confluence yet. Waiting for a high probability setup protects your capital.`});
+  else r.push({icon:'⏳',text:`Confluence score ${Math.max(bull,bear)}/27 — need score ≥8 with 60%+ confidence. Waiting for stronger setup protects your capital.`});
 
   return r;
 }
@@ -544,7 +546,7 @@ async function getSignalForPair(pair){
 // ROUTES
 // ============================================================
 app.get('/',(req,res)=>res.json({
-  status:'TRADEPLUS BACKEND LIVE ✅',version:'8.0',
+  status:'TRADEPLUS BACKEND LIVE ✅',version:'9.0',
   source:'Stooq.com — Real-time prices matching Exness/MT5',
   engine:'Deep Signal Engine — 15 indicators, 27 weighted factors',
   minScore:'8/27 required for signal',
@@ -575,7 +577,7 @@ app.get('/api/news',async(req,res)=>{
 });
 
 app.get('/api/health',(req,res)=>res.json({
-  alive:true,version:'8.0',engine:'Deep Signal Engine',
+  alive:true,version:'9.0',engine:'Deep Signal Engine',
   session:getSession().name,blackout:isBlackout(),
   cached:Object.keys(cache).length,time:new Date().toISOString()
 }));
