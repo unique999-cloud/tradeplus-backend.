@@ -45,20 +45,24 @@ async function getLivePrice(stooqSymbol) {
 // ============================================================
 async function getHistoricalCandles(stooqSymbol) {
   try {
-    const url  = `https://stooq.com/q/d/l/?s=${stooqSymbol}&i=h`;
+    // Daily candles — no API key needed
+    const url  = `https://stooq.com/q/d/l/?s=${stooqSymbol}&i=d`;
     const res  = await fetch(url, { timeout: 10000 });
     const text = await res.text();
+    // If we get API key error, return null
+    if (text.includes('apikey') || text.includes('Authorization') || text.includes('Get your')) return null;
     const lines = text.trim().split('\n');
     if (lines.length < 5) return null;
-    return lines.slice(1).map(line => {
+    // Use last 200 daily candles only
+    return lines.slice(1).slice(-200).map(line => {
       const p = line.split(',');
       if (p.length < 5) return null;
       return {
-        time:  p[0] + ' ' + (p[1] || '00:00:00'),
-        open:  parseFloat(p[2]),
-        high:  parseFloat(p[3]),
-        low:   parseFloat(p[4]),
-        close: parseFloat(p[5] || p[4]),
+        time:  p[0] + ' 00:00:00',
+        open:  parseFloat(p[1]),
+        high:  parseFloat(p[2]),
+        low:   parseFloat(p[3]),
+        close: parseFloat(p[4]),
       };
     }).filter(c => c && !isNaN(c.close) && c.close > 0);
   } catch(e) { return null; }
@@ -540,7 +544,7 @@ async function getSignalForPair(pair){
 // ROUTES
 // ============================================================
 app.get('/',(req,res)=>res.json({
-  status:'TRADEPLUS BACKEND LIVE ✅',version:'7.0',
+  status:'TRADEPLUS BACKEND LIVE ✅',version:'8.0',
   source:'Stooq.com — Real-time prices matching Exness/MT5',
   engine:'Deep Signal Engine — 15 indicators, 27 weighted factors',
   minScore:'8/27 required for signal',
@@ -571,7 +575,7 @@ app.get('/api/news',async(req,res)=>{
 });
 
 app.get('/api/health',(req,res)=>res.json({
-  alive:true,version:'7.0',engine:'Deep Signal Engine',
+  alive:true,version:'8.0',engine:'Deep Signal Engine',
   session:getSession().name,blackout:isBlackout(),
   cached:Object.keys(cache).length,time:new Date().toISOString()
 }));
