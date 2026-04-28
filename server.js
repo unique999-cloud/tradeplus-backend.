@@ -1,4 +1,4 @@
- const express = require('express');
+const express = require('express');
 const fetch = (...args) => import('node-fetch').then(({default:f})=>f(...args));
 const app = express();
 
